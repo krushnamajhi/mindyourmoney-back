@@ -4,6 +4,7 @@ import { ExpenseService } from "../services/expense.service";
 import { getLoggedInUserId } from "../../../utils/apiUtils";
 import { SettleExpenseDTO } from "../dto/settle-expense.dto";
 import { ExpenseFilterDTO } from "../dto/expense-filter.dto";
+import { NotFoundException } from "../../../lib/custom-errors";
 
 export class ExpenseController {
     private expenseService: ExpenseService
@@ -46,8 +47,7 @@ export class ExpenseController {
         try {
             const data = await this.expenseService.getExpenseDetails(Number(id));
             if (!data) {
-                res.status(404).json({ success: false, error: 'Expense not found' });
-                return;
+                throw new NotFoundException('Expense not found');
             }
             res.status(200).json({ success: true, data });
         } catch (error: any) {
@@ -144,8 +144,7 @@ export class ExpenseController {
             const data = await this.expenseService.getAllSettledExpense();
             console.log(data, "data settelements");
             if (!data) {
-                res.status(404).json({ success: false, error: 'Settlement expense not found' });
-                return;
+                throw new NotFoundException('Settlement expense not found');
             }
             res.status(200).json({ success: true, data });
         } catch (error: any) {
