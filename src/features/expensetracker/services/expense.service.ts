@@ -268,6 +268,102 @@ export class ExpenseService {
         }, queryRunner);
     }
 
+    async filterExpenses_1(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<(Expense & { userDebt: number })[]> {
+        const { groupId, isShared, paidByUserId, expenseCategoryId, title } = filter;
+        const manager = SQLUtils.getManagerFromQueryRunner(queryRunner);
+
+        // 1. Initialize QueryBuilder with required joins to satisfy your Schema
+        const query = manager.createQueryBuilder(Expense, "expense")
+            .leftJoinAndSelect("expense.paidByUser", "user")
+            .leftJoinAndSelect("expense.group", "group")
+            .leftJoinAndSelect("expense.expenseCategory", "category");
+
+        if (isShared && isShared !== Filter_ALL) {
+            query.andWhere("expense.isShared IN(:...isShared)", { isShared: isShared });
+        }
+
+        if (groupId && groupId !== Filter_ALL) {
+            const gIds = (groupId as any[]).filter(g => g !== Filter_NONE);
+            const hasNone = (groupId as any[]).includes(Filter_NONE);
+
+            if (hasNone || gIds.length > 0) {
+                query.andWhere(new Brackets(qb => {
+                    if (hasNone) {
+                        qb.where("expense.groupId IS NULL");
+                        if (gIds.length > 0) qb.orWhere("group.id IN(:...gIds)", { gIds });
+                    } else {
+                        qb.where("group.id IN(:...gIds)", { gIds });
+                    }
+                }));
+            }
+        }
+
+        // Add a subquery to calculate the logged-in user's debt for each expense
+        const userId = context().getUser().id;
+        query.addSelect(sub => {
+            return sub
+                .select("SUM(debt.debtAmount)", "sum")
+                .from(DebtMemberSplitExpenseLine, "debt")
+                .where("debt.expenseId = expense.id")
+                .andWhere("debt.groupMemberId = :userId", { userId });
+        }, "userDebt");
+
+        if (paidByUserId && paidByUserId !== Filter_ALL) {
+            query.andWhere("user.id IN(:...paidByUserId)", { paidByUserId: paidByUserId });
+        }
+
+        if (expenseCategoryId && expenseCategoryId !== Filter_ALL) {
+            const cIds = (expenseCategoryId as any[]).filter(c => c !== Filter_NONE);
+            const hasNone = (expenseCategoryId as any[]).includes(Filter_NONE);
+
+            if (hasNone || cIds.length > 0) {
+                query.andWhere(new Brackets(qb => {
+                    if (hasNone) {
+                        qb.where("expense.expenseCategoryId IS NULL");
+                        if (cIds.length > 0) qb.orWhere("category.id IN(:...cIds)", { cIds });
+                    } else {
+                        qb.where("category.id IN(:...cIds)", { cIds });
+                    }
+                }));
+            }
+        }
+
+        if (title && title.trim() !== "") {
+            query.andWhere(new Brackets(qb => {
+                qb.where("expense.title LIKE :search", { search: `%${title}%` })
+                    .orWhere("expense.description LIKE :search", { search: `%${title}%` });
+            }));
+        }
+
+        if (filter.startDate) {
+            query.andWhere("expense.expenseDate >= :startDate", { startDate: filter.startDate })
+        }
+        if (filter.endDate) {
+            query.andWhere("expense.expenseDate <= :endDate", { endDate: filter.endDate })
+        }
+
+        // 3. Order and Execution
+        query.orderBy("expense.expenseDate", "DESC");
+        query.orderBy("expense.id", "DESC");
+
+        try {
+            console.log(`[CYBER-LOG]: Dispatching Filtered Query...`);
+            const { entities, raw } = await query.getRawAndEntities();
+            console.log('entities', entities);
+            console.log('raw', raw);
+
+            // Map the virtual 'userDebt' column manually to each expense
+            return entities.map((ex, index) => {
+                const userDebt = raw[index].userDebt || 0;
+                return Object.assign(ex, { userDebt: userDebt }) as Expense & { userDebt: number };
+            });
+        } catch (error) {
+            // If this fails, it's likely a column naming mismatch in your Entity file
+            console.error("[SYSTEM ERROR]: SQL Execution Blocked", error);
+            throw error;
+        }
+    }
+
     async filterExpenses(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<(Expense & { userDebt: number })[]> {
         const { groupId, isShared, paidByUserId, expenseCategoryId, title } = filter;
         const manager = SQLUtils.getManagerFromQueryRunner(queryRunner);
