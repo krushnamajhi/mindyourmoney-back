@@ -24,7 +24,8 @@ export const useFeatureRoutes = (app: any) => {
 
 export const startServer = (app: any) => {
     const PORT = process.env.PORT || 3000;
-    app.listen(PORT, '192.168.1.15', () => {
-        console.log(`Server is running on http://localhost:${PORT}`);
+    const HOST = process.env.APP_HOST || "localhost"
+    app.listen(PORT, HOST, () => {
+        console.log(`Server is running on http://${HOST}:${PORT}`);
     });
 }

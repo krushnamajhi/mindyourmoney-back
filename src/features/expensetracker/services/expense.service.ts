@@ -5,7 +5,7 @@ import { ExpenseDTO } from "../dto/expense.dto";
 import { ExpenseCategory } from "../entities/expense-category";
 import { SQLUtils } from "../../../utils/sql.utils";
 import { DebtMemberSplitExpenseLine } from "../entities/debt-member-split-expense-line";
-import { ValidationError } from "../../../lib/custom-errors";
+import { NotFoundException, ValidationError } from "../../../lib/custom-errors";
 import { User } from "../../user/entities/user";
 import { ExpenseItemLineSplitType, ExpenseSplitType } from "../lib/split-type.enum";
 import { DebtMemberSplitExpenseItemLine } from "../entities/debt-member-split-expense-item-line";
@@ -90,22 +90,10 @@ export class ExpenseService {
     }
 
     async getExpenseDetails(id: number, transactionalManager?: EntityManager): Promise<ExpenseDTO | null> {
-        const manager = transactionalManager || SQLUtils.getManager();
+        const manager = SQLUtils.getManager(transactionalManager);
 
         // 1. Fetch full hierarchy
-        const expense = await manager.findOne(Expense, {
-            where: [
-                { id: id as any, isSettled: false },
-                { id: id as any, isSettled: IsNull() }
-            ],
-            relations: [
-                'paidByUser.userInfo',
-                'group',
-                'expenseCategory'
-            ]
-        });
-
-        if (!expense) return null;
+        const expense = await this.getExpenseById(id, false, manager);
 
         // Fetch splits manually to avoid massive join explosions
         const debtMemberSplitsRaw = await manager.find(DebtMemberSplitExpenseLine, {
@@ -184,8 +172,7 @@ export class ExpenseService {
             ...(expense.group && { groupId: expense.group.id }),
             ...(expense.expenseCategory && { expenseCategoryId: expense.expenseCategory.id })
         };
-        console.log(dto);
-
+        if (!dto) throw new NotFoundException('Expense not found');
         return dto;
     }
 
@@ -283,7 +270,7 @@ export class ExpenseService {
 
     async filterExpenses(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<(Expense & { userDebt: number })[]> {
         const { groupId, isShared, paidByUserId, expenseCategoryId, title } = filter;
-        const manager = queryRunner ? queryRunner.manager : SQLUtils.getManager();
+        const manager = SQLUtils.getManagerFromQueryRunner(queryRunner);
 
         // 1. Initialize QueryBuilder with required joins to satisfy your Schema
         const query = manager.createQueryBuilder(Expense, "expense")
@@ -378,7 +365,7 @@ export class ExpenseService {
     }
 
     async getDebtAmuontForLoggedInUserInExpense(id: number, userId: number, transactionalManager?: EntityManager, queryRunner?: QueryRunner): Promise<number> {
-        const manager = queryRunner ? queryRunner.manager : SQLUtils.getManager()
+        const manager = SQLUtils.getManagerFromQueryRunner(queryRunner);
         const query = manager.createQueryBuilder(DebtMemberSplitExpenseLine, "debt_member_split_expense_line")
             .select("SUM(debt_member_split_expense_line.debtAmount)", "sum")
             .where("debt_member_split_expense_line.expenseId = :expenseId", { expenseId: id })
@@ -434,10 +421,10 @@ export class ExpenseService {
 
             // 1. Fetch existing settlement expense
             const expense = await SQLUtils.getRepo(Expense, manager).findOne({
-                where: { id: id as any },
+                where: { id: id as any, isSettled: true },
                 relations: ['group', 'paidByUser', 'paidByUser.userInfo']
             });
-            if (!expense) return null;
+            if (!expense) throw new NotFoundException('Settlement expense not found');
 
             // 2. Validate balance
             const userBalance = await manager.findOneBy(UserBalance, { userId: details.paidByUserId, groupId: groupId, peerId: settledMemberId });
@@ -486,14 +473,10 @@ export class ExpenseService {
     }
 
 
-    async getSettledExpense(id: number, transactionalManager?: EntityManager): Promise<SettleExpenseDTO | null> {
-        const manager = transactionalManager || SQLUtils.getManager();
+    async getSettledExpense(id: number, transactionalManager?: EntityManager): Promise<SettleExpenseDTO> {
+        const manager = SQLUtils.getManager(transactionalManager);
 
-        const expense = await manager.findOne(Expense, {
-            where: { id: id, isSettled: true },
-            relations: ['paidByUser', 'paidByUser.userInfo', 'group']
-        });
-        if (!expense) return null;
+        const expense = await this.getExpenseById(id, true, manager);
 
         // Find debt splits for this expense
         const debtSplits = await manager.find(DebtMemberSplitExpenseLine, {
@@ -511,12 +494,15 @@ export class ExpenseService {
             groupId: expense.group?.id,
             settledMemberId: settledSplit?.groupMemberId ?? 0
         } as SettleExpenseDTO;
+        if (!dto) {
+            throw new NotFoundException('Settlement expense not found');
+        }
 
         return dto;
     }
 
     async getAllSettledExpense(transactionalManager?: EntityManager): Promise<SettleExpenseDTO[] | null> {
-        const manager = transactionalManager || SQLUtils.getManager();
+        const manager = SQLUtils.getManager(transactionalManager);
 
         // Optimized: Single query fetching debtor splits for settlements.
         // This gives us one row per settlement, containing both expense data and the settled member.
@@ -528,8 +514,6 @@ export class ExpenseService {
             .andWhere("debt.debtAmount < 0") // The settled member is the debtor in the settlement record
             .orderBy("expense.id", "DESC")
         const settlements = await query.getMany();
-
-        if (settlements.length === 0) return null;
 
         return settlements.map(s => ({
             expenseId: s.expense.id,
@@ -711,5 +695,30 @@ export class ExpenseService {
         }
         else throw new ValidationError(`split type value "${splitType}" is invalid`)
         return debtRows;
+    }
+
+    async getExpenseById(id: number, isSettled?: boolean, transactionalManager?: EntityManager): Promise<Expense> {
+        const manager = SQLUtils.getManager(transactionalManager);
+        let where: any[]
+        if (!isSettled) {
+            where = [
+                { id: id as any, isSettled: false },
+                { id: id as any, isSettled: IsNull() }
+            ]
+        }
+        else {
+            where = [{ id: id as any, isSettled: true }]
+        }
+        const expense = await manager.findOne(Expense, {
+            where: where,
+            relations: [
+                'paidByUser.userInfo',
+                'group',
+                'expenseCategory'
+            ]
+        });
+
+        if (!expense) throw new NotFoundException('Expense not found');
+        return expense;
     }
 }

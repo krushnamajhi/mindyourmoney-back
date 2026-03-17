@@ -6,15 +6,28 @@ export class SQLUtils {
 
     static getRepo<T extends ObjectLiteral>(type: EntityTarget<T>, manager?: EntityManager): Repository<T> {
         // We cast to any or the specific Repository<T> to satisfy strict compiler checks
-        if (manager) {
-            return manager.getRepository(type);
-        }
-        return this.dataSource.getRepository(type);
+        return this.getManager(manager).getRepository(type);
     }
 
-    static getManager(): EntityManager {
-        // We cast to any or the specific Repository<T> to satisfy strict compiler checks
+    static getManager(manager?: EntityManager): EntityManager {
+        if (manager) {
+            return manager;
+        }
         return this.dataSource.manager;
+    }
+
+    static getManagerFromQueryRunner(queryRunner?: QueryRunner): EntityManager {
+        if (queryRunner) {
+            return queryRunner.manager;
+        }
+        return this.dataSource.manager;
+    }
+
+    static getQueryRunner(queryRunner?: QueryRunner): QueryRunner {
+        if (queryRunner) {
+            return queryRunner;
+        }
+        return this.dataSource.createQueryRunner();
     }
     /**
      * Executes logic within a transaction using a QueryRunner.
@@ -25,7 +38,7 @@ export class SQLUtils {
         existingQueryRunner?: QueryRunner
     ): Promise<T> {
         // Use existing runner if provided (for nested calls), otherwise create new
-        const qr = existingQueryRunner || this.dataSource.createQueryRunner();
+        const qr = this.getQueryRunner(existingQueryRunner);
         const isInternal = !existingQueryRunner;
 
         if (isInternal) {

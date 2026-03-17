@@ -46,9 +46,6 @@ export class ExpenseController {
         const { id } = req.params;
         try {
             const data = await this.expenseService.getExpenseDetails(Number(id));
-            if (!data) {
-                throw new NotFoundException('Expense not found');
-            }
             res.status(200).json({ success: true, data });
         } catch (error: any) {
             next(error)
@@ -68,7 +65,6 @@ export class ExpenseController {
     update: RequestHandler = async (req, res, next: NextFunction) => {
         const { id } = req.params;
         const ExpenseDTO: ExpenseDTO = req.body;
-        console.log(ExpenseDTO, "log")
         try {
             const expense = await this.expenseService.update(Number(id), ExpenseDTO);
             res.json({ expense });
@@ -129,10 +125,6 @@ export class ExpenseController {
         const { id } = req.params;
         try {
             const data = await this.expenseService.getSettledExpense(Number(id));
-            if (!data) {
-                res.status(404).json({ success: false, error: 'Settlement expense not found' });
-                return;
-            }
             res.status(200).json({ success: true, data });
         } catch (error: any) {
             next(error)
@@ -142,10 +134,6 @@ export class ExpenseController {
     getAllSettledExpense: RequestHandler = async (req, res, next: NextFunction) => {
         try {
             const data = await this.expenseService.getAllSettledExpense();
-            console.log(data, "data settelements");
-            if (!data) {
-                throw new NotFoundException('Settlement expense not found');
-            }
             res.status(200).json({ success: true, data });
         } catch (error: any) {
             next(error)
