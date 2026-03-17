@@ -19,6 +19,7 @@ import { SettleExpenseDTO } from "../dto/settle-expense.dto";
 import { UserBalance } from "../entities/simplified-peer-debt.view";
 import { context } from "../../../utils/apiUtils";
 import { Filter_ALL, Filter_NONE } from "../../../config/constants";
+import { ExpenseRowDTO, ExpenseRowDayWiseDTO, ExpenseRowMonthWiseDTO, ExpenseRowYearWiseDTO } from "../dto/expenses-rows.dto";
 
 export class ExpenseService {
 
@@ -71,7 +72,7 @@ export class ExpenseService {
         }, queryRunner);
     }
 
-    async getAll(transactionalManager?: EntityManager): Promise<Expense[]> {
+    async getAll(transactionalManager?: EntityManager): Promise<ExpenseRowYearWiseDTO[]> {
         const filter: Pick<ExpenseFilterDTO, 'groupId' | 'expenseCategoryId'> = {
             groupId: Filter_ALL,
             expenseCategoryId: Filter_ALL
@@ -308,6 +309,22 @@ export class ExpenseService {
                 .andWhere("debt.groupMemberId = :userId", { userId });
         }, "userDebt");
 
+        // Exclude orphan shared expenses where:
+        // group is null, isShared=true, payer is someone else, and current user has no debt split row.
+        const userMembershipSubQuery = query.subQuery()
+            .select("1")
+            .from(DebtMemberSplitExpenseLine, "membershipDebt")
+            .where("membershipDebt.expenseId = expense.id")
+            .andWhere("membershipDebt.groupMemberId = :userId")
+            .getQuery();
+
+        query.andWhere(new Brackets(qb => {
+            qb.where("expense.groupId IS NOT NULL")
+                .orWhere("expense.isShared = :isSharedFalse", { isSharedFalse: false })
+                .orWhere("user.id = :userId")
+                .orWhere(`EXISTS ${userMembershipSubQuery}`);
+        }));
+
         if (paidByUserId && paidByUserId !== Filter_ALL) {
             query.andWhere("user.id IN(:...paidByUserId)", { paidByUserId: paidByUserId });
         }
@@ -364,38 +381,71 @@ export class ExpenseService {
         }
     }
 
-    async filterExpenses(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<(Expense & { userDebt: number })[]> {
-        const { groupId, isShared, paidByUserId, expenseCategoryId, title } = filter;
+    async filterExpenses(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<ExpenseRowYearWiseDTO[]> {
+        const { groupId, isShared, paidByUserId, expenseCategoryId, title, startDate, endDate, limit } = filter;
         const manager = SQLUtils.getManagerFromQueryRunner(queryRunner);
+        const userId = context().getUser().id;
 
-        // 1. Initialize QueryBuilder with required joins to satisfy your Schema
+        const normalizeBoolean = (value: unknown): boolean => value === true || value === "true" || value === 1;
+        const normalizeIdArray = <T>(value: T[] | string | undefined, noneToken: string) => {
+            if (!value || value === Filter_ALL) {
+                return { ids: [] as T[], hasNone: false, hasFilter: false };
+            }
+            const arr = value as T[];
+            return {
+                ids: arr.filter((item) => item !== (noneToken as unknown as T)),
+                hasNone: arr.includes(noneToken as unknown as T),
+                hasFilter: arr.length > 0,
+            };
+        };
+
+        // 1. Build a lean query: fetch only columns required by ExpenseRowDTO.
         const query = manager.createQueryBuilder(Expense, "expense")
-            .leftJoinAndSelect("expense.paidByUser", "user")
-            .leftJoinAndSelect("expense.group", "group")
-            .leftJoinAndSelect("expense.expenseCategory", "category");
+            .leftJoin("expense.paidByUser", "user")
+            .leftJoin("expense.group", "group")
+            .leftJoin("expense.expenseCategory", "category")
+            .leftJoin(
+                DebtMemberSplitExpenseLine,
+                "settlementDebt",
+                "settlementDebt.expenseId = expense.id AND expense.isSettled = :isSettledTrue AND settlementDebt.debtAmount < 0",
+                { isSettledTrue: true }
+            )
+            .leftJoin(User, "paidToUser", "paidToUser.id = settlementDebt.groupMemberId")
+            .select("expense.id", "id")
+            .addSelect("expense.expenseDate", "expenseDate")
+            .addSelect("expense.title", "title")
+            .addSelect("expense.description", "description")
+            .addSelect("expense.amount", "amount")
+            .addSelect("expense.isShared", "isShared")
+            .addSelect("expense.isSettled", "isSettled")
+            .addSelect("user.id", "paidByUserId")
+            .addSelect("user.fullName", "paidByUserFullName")
+            .addSelect("settlementDebt.groupMemberId", "paidToUserId")
+            .addSelect("paidToUser.fullName", "paidToUserFullName")
+            .addSelect("group.id", "groupId")
+            .addSelect("group.name", "groupName")
+            .addSelect("category.id", "expenseCategoryId")
+            .addSelect("category.name", "expenseCategoryName");
 
         if (isShared && isShared !== Filter_ALL) {
             query.andWhere("expense.isShared IN(:...isShared)", { isShared: isShared });
         }
 
-        if (groupId && groupId !== Filter_ALL) {
-            const gIds = (groupId as any[]).filter(g => g !== Filter_NONE);
-            const hasNone = (groupId as any[]).includes(Filter_NONE);
-
-            if (hasNone || gIds.length > 0) {
-                query.andWhere(new Brackets(qb => {
-                    if (hasNone) {
-                        qb.where("expense.groupId IS NULL");
-                        if (gIds.length > 0) qb.orWhere("group.id IN(:...gIds)", { gIds });
-                    } else {
-                        qb.where("group.id IN(:...gIds)", { gIds });
+        const normalizedGroupFilter = normalizeIdArray(groupId as any[] | string | undefined, Filter_NONE);
+        if (normalizedGroupFilter.hasFilter) {
+            query.andWhere(new Brackets(qb => {
+                if (normalizedGroupFilter.hasNone) {
+                    qb.where("expense.groupId IS NULL");
+                    if (normalizedGroupFilter.ids.length > 0) {
+                        qb.orWhere("group.id IN(:...gIds)", { gIds: normalizedGroupFilter.ids });
                     }
-                }));
-            }
+                } else {
+                    qb.where("group.id IN(:...gIds)", { gIds: normalizedGroupFilter.ids });
+                }
+            }));
         }
 
         // Add a subquery to calculate the logged-in user's debt for each expense
-        const userId = context().getUser().id;
         query.addSelect(sub => {
             return sub
                 .select("SUM(debt.debtAmount)", "sum")
@@ -404,24 +454,38 @@ export class ExpenseService {
                 .andWhere("debt.groupMemberId = :userId", { userId });
         }, "userDebt");
 
+        // Exclude orphan shared expenses where:
+        // group is null, isShared=true, payer is someone else, and current user has no debt split row.
+        const userMembershipSubQuery = query.subQuery()
+            .select("1")
+            .from(DebtMemberSplitExpenseLine, "membershipDebt")
+            .where("membershipDebt.expenseId = expense.id")
+            .andWhere("membershipDebt.groupMemberId = :userId")
+            .getQuery();
+
+        query.andWhere(new Brackets(qb => {
+            qb.where("expense.groupId IS NOT NULL")
+                .orWhere("expense.isShared = :isSharedFalse", { isSharedFalse: false })
+                .orWhere("user.id = :userId")
+                .orWhere(`EXISTS ${userMembershipSubQuery}`);
+        }));
+
         if (paidByUserId && paidByUserId !== Filter_ALL) {
             query.andWhere("user.id IN(:...paidByUserId)", { paidByUserId: paidByUserId });
         }
 
-        if (expenseCategoryId && expenseCategoryId !== Filter_ALL) {
-            const cIds = (expenseCategoryId as any[]).filter(c => c !== Filter_NONE);
-            const hasNone = (expenseCategoryId as any[]).includes(Filter_NONE);
-
-            if (hasNone || cIds.length > 0) {
-                query.andWhere(new Brackets(qb => {
-                    if (hasNone) {
-                        qb.where("expense.expenseCategoryId IS NULL");
-                        if (cIds.length > 0) qb.orWhere("category.id IN(:...cIds)", { cIds });
-                    } else {
-                        qb.where("category.id IN(:...cIds)", { cIds });
+        const normalizedCategoryFilter = normalizeIdArray(expenseCategoryId as any[] | string | undefined, Filter_NONE);
+        if (normalizedCategoryFilter.hasFilter) {
+            query.andWhere(new Brackets(qb => {
+                if (normalizedCategoryFilter.hasNone) {
+                    qb.where("expense.expenseCategoryId IS NULL");
+                    if (normalizedCategoryFilter.ids.length > 0) {
+                        qb.orWhere("category.id IN(:...cIds)", { cIds: normalizedCategoryFilter.ids });
                     }
-                }));
-            }
+                } else {
+                    qb.where("category.id IN(:...cIds)", { cIds: normalizedCategoryFilter.ids });
+                }
+            }));
         }
 
         if (title && title.trim() !== "") {
@@ -431,28 +495,137 @@ export class ExpenseService {
             }));
         }
 
-        if (filter.startDate) {
-            query.andWhere("expense.expenseDate >= :startDate", { startDate: filter.startDate })
+        if (startDate) {
+            query.andWhere("expense.expenseDate >= :startDate", { startDate })
         }
-        if (filter.endDate) {
-            query.andWhere("expense.expenseDate <= :endDate", { endDate: filter.endDate })
+        if (endDate) {
+            query.andWhere("expense.expenseDate <= :endDate", { endDate })
         }
 
-        // 3. Order and Execution
+        // 3. Order and execution
         query.orderBy("expense.expenseDate", "DESC");
-        query.orderBy("expense.id", "DESC");
+        query.addOrderBy("expense.id", "DESC");
+        if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+            const safeLimit = Math.floor(limit);
+            // `getRawMany` honors SQL `LIMIT` more consistently across drivers than `take`.
+            query.limit(safeLimit);
+        }
 
         try {
-            console.log(`[CYBER-LOG]: Dispatching Filtered Query...`);
-            const { entities, raw } = await query.getRawAndEntities();
-            console.log('entities', entities);
-            console.log('raw', raw);
+            const rawRows = await query.getRawMany<{
+                id: number | string;
+                expenseDate: Date | string;
+                title: string;
+                description: string | null;
+                amount: number | string;
+                paidByUserId: number | string | null;
+                paidByUserFullName: string | null;
+                paidToUserId: number | string | null;
+                paidToUserFullName: string | null;
+                groupId: number | string | null;
+                groupName: string | null;
+                expenseCategoryId: number | string | null;
+                expenseCategoryName: string | null;
+                isShared: boolean | string | number | null;
+                isSettled: boolean | string | number | null;
+                userDebt: number | string | null;
+            }>();
 
-            // Map the virtual 'userDebt' column manually to each expense
-            return entities.map((ex, index) => {
-                const userDebt = raw[index].userDebt || 0;
-                return Object.assign(ex, { userDebt: userDebt }) as Expense & { userDebt: number };
-            });
+            if (rawRows.length === 0) {
+                return [];
+            }
+
+            const monthNames = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+
+            // O(n) grouping using hash maps: year -> month -> day -> expenses
+            const groupedByYear = new Map<number, Map<number, Map<number, ExpenseRowDTO[]>>>();
+
+            for (const row of rawRows) {
+                const expenseDate = new Date(row.expenseDate);
+                const year = expenseDate.getFullYear();
+                const month = expenseDate.getMonth() + 1;
+                const day = expenseDate.getDate();
+
+                const expenseRow: ExpenseRowDTO = {
+                    id: Number(row.id),
+                    expenseDate,
+                    title: row.title,
+                    description: row.description || "",
+                    amount: Number(row.amount),
+                    paidByUser: {
+                        id: Number(row.paidByUserId || 0),
+                        fullName: row.paidByUserFullName || "Unknown User"
+                    },
+                    isShared: normalizeBoolean(row.isShared),
+                    isSettled: normalizeBoolean(row.isSettled),
+                    balance: Number(row.userDebt || 0)
+                };
+                if (normalizeBoolean(row.isSettled) && row.paidToUserId != null) {
+                    expenseRow.paidToUser = {
+                        id: Number(row.paidToUserId),
+                        fullName: row.paidToUserFullName || "Unknown User"
+                    };
+                }
+                if (row.groupId != null) {
+                    expenseRow.group = {
+                        id: Number(row.groupId),
+                        name: row.groupName || "Unnamed Group"
+                    };
+                }
+                if (row.expenseCategoryId != null) {
+                    expenseRow.expenseCategory = {
+                        id: Number(row.expenseCategoryId),
+                        name: row.expenseCategoryName || "Uncategorized"
+                    };
+                }
+
+                let monthsMap = groupedByYear.get(year);
+                if (!monthsMap) {
+                    monthsMap = new Map<number, Map<number, ExpenseRowDTO[]>>();
+                    groupedByYear.set(year, monthsMap);
+                }
+
+                let daysMap = monthsMap.get(month);
+                if (!daysMap) {
+                    daysMap = new Map<number, ExpenseRowDTO[]>();
+                    monthsMap.set(month, daysMap);
+                }
+
+                let dayRows = daysMap.get(day);
+                if (!dayRows) {
+                    dayRows = [];
+                    daysMap.set(day, dayRows);
+                }
+                dayRows.push(expenseRow);
+            }
+
+            return Array.from(groupedByYear.entries())
+                .sort(([yearA], [yearB]) => yearB - yearA)
+                .map(([year, monthsMap]) => {
+                    const expensesPerYear: ExpenseRowMonthWiseDTO[] = Array.from(monthsMap.entries())
+                        .sort(([monthA], [monthB]) => monthB - monthA)
+                        .map(([month, daysMap]) => {
+                            const expensesPerMonth: ExpenseRowDayWiseDTO[] = Array.from(daysMap.entries())
+                                .sort(([dayA], [dayB]) => dayB - dayA)
+                                .map(([day, expensesPerDay]) => ({
+                                    day,
+                                    expensesPerDay
+                                }));
+
+                            return {
+                                month: monthNames[month - 1] ?? "Unknown",
+                                expensesPerMonth
+                            };
+                        });
+
+                    return {
+                        year,
+                        expensesPerYear
+                    };
+                });
         } catch (error) {
             // If this fails, it's likely a column naming mismatch in your Entity file
             console.error("[SYSTEM ERROR]: SQL Execution Blocked", error);

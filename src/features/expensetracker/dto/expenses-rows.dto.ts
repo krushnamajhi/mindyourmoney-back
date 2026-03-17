@@ -1,24 +1,64 @@
 import { Type } from "class-transformer";
-import { IsArray, IsBoolean, IsDate, IsEnum, IsInt, IsNumber, IsOptional, IsString, ValidateNested } from "class-validator";
-import { DebtMemberSplitExpenseLineDTO } from "./debt-member-split-expense-line.dto";
+import { IsBoolean, IsDate, IsInt, IsNumber, IsOptional, IsString, ValidateNested } from "class-validator";
 
 
 export class ExpenseRowDayWiseDTO {
     @IsInt()
     day: number;
+
+    @ValidateNested({ each: true })
+    @Type(() => ExpenseRowDTO)
     expensesPerDay: ExpenseRowDTO[];
 }
 
 export class ExpenseRowMonthWiseDTO {
-    @IsInt()
-    month: number;
-    expensesPerMonth: ExpenseRowDTO[];
+    @IsString()
+    month: string;
+
+    @ValidateNested({ each: true })
+    @Type(() => ExpenseRowDayWiseDTO)
+    expensesPerMonth: ExpenseRowDayWiseDTO[];
 }
 
 export class ExpenseRowYearWiseDTO {
     @IsInt()
     year: number;
-    expensesPerYear: ExpenseRowDTO[];
+
+    @ValidateNested({ each: true })
+    @Type(() => ExpenseRowMonthWiseDTO)
+    expensesPerYear: ExpenseRowMonthWiseDTO[];
+}
+
+export class ExpenseRowUserDTO {
+    @IsInt()
+    id: number;
+
+    @IsString()
+    fullName: string;
+}
+
+export class ExpenseRowPaidToUserDTO {
+    @IsInt()
+    id: number;
+
+    @IsString()
+    fullName: string;
+}
+
+export class ExpenseRowGroupDTO {
+    @IsInt()
+    id: number;
+
+    @IsString()
+    name: string;
+}
+
+export class ExpenseRowCategoryDTO {
+    @IsInt()
+    id: number;
+
+    @IsString()
+    name: string;
 }
 
 export class ExpenseRowDTO {
@@ -34,25 +74,37 @@ export class ExpenseRowDTO {
 
     @IsString()
     @IsOptional()
-    description: string;
+    description?: string;
 
     @IsNumber()
     amount: number;
 
-    @IsNumber()
-    paidByUserId: number;
+    @ValidateNested()
+    @Type(() => ExpenseRowUserDTO)
+    paidByUser: ExpenseRowUserDTO;
 
     @IsOptional()
-    @IsInt({ each: true })
-    groupId: number;
+    @ValidateNested()
+    @Type(() => ExpenseRowPaidToUserDTO)
+    paidToUser?: ExpenseRowPaidToUserDTO;
 
     @IsOptional()
-    @IsInt({ each: true })
-    expenseCategoryId: number;
+    @ValidateNested()
+    @Type(() => ExpenseRowGroupDTO)
+    group?: ExpenseRowGroupDTO;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => ExpenseRowCategoryDTO)
+    expenseCategory?: ExpenseRowCategoryDTO;
 
     @IsBoolean()
     @IsOptional()
-    isShared: boolean
+    isShared?: boolean
+
+    @IsBoolean()
+    @IsOptional()
+    isSettled?: boolean
 
     @IsNumber()
     balance: number;
