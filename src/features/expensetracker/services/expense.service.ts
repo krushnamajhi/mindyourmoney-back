@@ -354,7 +354,7 @@ export class ExpenseService {
 
             // Map the virtual 'userDebt' column manually to each expense
             return entities.map((ex, index) => {
-                const userDebt = raw[index].userDebt || 0;
+                const userDebt = raw[index].userDebt ? raw[index].userDebt : ex.isShared ? 0 : -ex.amount;
                 return Object.assign(ex, { userDebt: userDebt }) as Expense & { userDebt: number };
             });
         } catch (error) {
