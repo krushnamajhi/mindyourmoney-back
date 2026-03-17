@@ -84,8 +84,14 @@ export const UpdateExpenseSchema = z.object({
 
 export const ExpenseFilterSchema = z.object({
   expenseDate: z.coerce.date().optional(),
-  startDate: z.coerce.date().optional(),
-  endDate: z.coerce.date().optional(),
+  startDate: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.coerce.date().optional()
+  ),
+  endDate: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.coerce.date().optional()
+  ),
   title: z.string().optional(),
   description: z.string().optional(),
   amount: z.coerce.number().positive().optional(),
