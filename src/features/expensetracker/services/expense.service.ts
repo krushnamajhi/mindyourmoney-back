@@ -19,7 +19,7 @@ import { SettleExpenseDTO } from "../dto/settle-expense.dto";
 import { UserBalance } from "../entities/simplified-peer-debt.view";
 import { context } from "../../../utils/apiUtils";
 import { Filter_ALL, Filter_NONE } from "../../../config/constants";
-import { ExpenseRowDTO, ExpenseRowDayWiseDTO, ExpenseRowMonthWiseDTO, ExpenseRowYearWiseDTO } from "../dto/expenses-rows.dto";
+import { ExpenseRowDTO, ExpenseRowDayWiseDTO, ExpenseRowMonthWiseDTO } from "../dto/expenses-rows.dto";
 
 export class ExpenseService {
 
@@ -72,7 +72,7 @@ export class ExpenseService {
         }, queryRunner);
     }
 
-    async getAll(transactionalManager?: EntityManager): Promise<ExpenseRowYearWiseDTO[]> {
+    async getAll(transactionalManager?: EntityManager): Promise<ExpenseRowMonthWiseDTO[]> {
         const filter: Pick<ExpenseFilterDTO, 'groupId' | 'expenseCategoryId'> = {
             groupId: Filter_ALL,
             expenseCategoryId: Filter_ALL
@@ -381,7 +381,7 @@ export class ExpenseService {
         }
     }
 
-    async filterExpenses(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<ExpenseRowYearWiseDTO[]> {
+    async filterExpenses(filter: Partial<ExpenseFilterDTO>, queryRunner?: QueryRunner): Promise<ExpenseRowMonthWiseDTO[]> {
         const { groupId, isShared, paidByUserId, expenseCategoryId, title, startDate, endDate, limit } = filter;
         const manager = SQLUtils.getManagerFromQueryRunner(queryRunner);
         const userId = context().getUser().id;
@@ -604,8 +604,8 @@ export class ExpenseService {
 
             return Array.from(groupedByYear.entries())
                 .sort(([yearA], [yearB]) => yearB - yearA)
-                .map(([year, monthsMap]) => {
-                    const expensesPerYear: ExpenseRowMonthWiseDTO[] = Array.from(monthsMap.entries())
+                .flatMap(([year, monthsMap]) =>
+                    Array.from(monthsMap.entries())
                         .sort(([monthA], [monthB]) => monthB - monthA)
                         .map(([month, daysMap]) => {
                             const expensesPerMonth: ExpenseRowDayWiseDTO[] = Array.from(daysMap.entries())
@@ -616,16 +616,12 @@ export class ExpenseService {
                                 }));
 
                             return {
+                                year,
                                 month: monthNames[month - 1] ?? "Unknown",
                                 expensesPerMonth
                             };
-                        });
-
-                    return {
-                        year,
-                        expensesPerYear
-                    };
-                });
+                        })
+                );
         } catch (error) {
             // If this fails, it's likely a column naming mismatch in your Entity file
             console.error("[SYSTEM ERROR]: SQL Execution Blocked", error);

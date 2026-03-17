@@ -12,21 +12,15 @@ export class ExpenseRowDayWiseDTO {
 }
 
 export class ExpenseRowMonthWiseDTO {
+    @IsInt()
+    year: number;
+
     @IsString()
     month: string;
 
     @ValidateNested({ each: true })
     @Type(() => ExpenseRowDayWiseDTO)
     expensesPerMonth: ExpenseRowDayWiseDTO[];
-}
-
-export class ExpenseRowYearWiseDTO {
-    @IsInt()
-    year: number;
-
-    @ValidateNested({ each: true })
-    @Type(() => ExpenseRowMonthWiseDTO)
-    expensesPerYear: ExpenseRowMonthWiseDTO[];
 }
 
 export class ExpenseRowUserDTO {
