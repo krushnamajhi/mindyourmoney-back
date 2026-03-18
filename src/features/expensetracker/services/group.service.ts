@@ -8,6 +8,7 @@ import { Expense } from "../entities/expense";
 import { APIError, ValidationError } from "../../../lib/custom-errors";
 import { context } from "../../../utils/apiUtils";
 import { UserBalance } from "../entities/simplified-peer-debt.view";
+import { GroupMemberDTO } from "../dto/group-member.dto";
 
 export class GroupService {
 
@@ -38,6 +39,7 @@ export class GroupService {
                     return manager.create(GroupMember, {
                         groupId: savedGroup.id,
                         userId: userId,
+                        isActive: true,
                     });
                 });
                 await manager.save(GroupMember, membershipRows);
@@ -53,8 +55,8 @@ export class GroupService {
 
         // 1. Fetch the groups where the user is a member
         const groups = await repo.createQueryBuilder("group")
-            .innerJoin("group.groupMembers", "filterMember", "filterMember.userId = :userId")
-            .leftJoinAndSelect("group.groupMembers", "groupMembers")
+            .innerJoin("group.groupMembers", "filterMember", "filterMember.userId = :userId AND filterMember.isActive = true")
+            .leftJoinAndSelect("group.groupMembers", "groupMembers", "groupMembers.isActive = true")
             .leftJoinAndSelect("groupMembers.user", "user")
             .leftJoinAndSelect("group.expenses", "expenses")
             .setParameter("userId", userId)
@@ -86,10 +88,50 @@ export class GroupService {
     }
 
     async getById(id: number, transactionalManager?: EntityManager): Promise<Groups | null> {
-        return await SQLUtils.getRepo(Groups, transactionalManager).findOne({
-            where: { id: id as any },
-            relations: ['groupMembers', 'groupMembers.user']
-        });
+        return await SQLUtils.getRepo(Groups, transactionalManager)
+            .createQueryBuilder("group")
+            .leftJoinAndSelect("group.groupMembers", "groupMembers", "groupMembers.isActive = true")
+            .leftJoinAndSelect("groupMembers.user", "user")
+            .where("group.id = :id", { id })
+            .getOne();
+    }
+
+    async getMembersByGroupId(groupId: number, transactionalManager?: EntityManager): Promise<GroupMemberDTO[]> {
+        const rows = await SQLUtils.getRepo(GroupMember, transactionalManager)
+            .createQueryBuilder("groupMember")
+            .leftJoin("groupMember.user", "user")
+            .select("groupMember.groupId", "groupId")
+            .addSelect("groupMember.userId", "userId")
+            .addSelect("groupMember.isActive", "isActive")
+            .addSelect("user.id", "memberUserId")
+            .addSelect("user.email", "memberUserEmail")
+            .addSelect("user.firstName", "memberUserFirstName")
+            .addSelect("user.lastName", "memberUserLastName")
+            .addSelect("user.fullName", "memberUserFullName")
+            .where("groupMember.groupId = :groupId", { groupId })
+            .getRawMany<{
+                groupId: number | string;
+                userId: number | string;
+                isActive: boolean | number | string;
+                memberUserId: number | string | null;
+                memberUserEmail: string | null;
+                memberUserFirstName: string | null;
+                memberUserLastName: string | null;
+                memberUserFullName: string | null;
+            }>();
+
+        return rows.map((row) => ({
+            groupId: Number(row.groupId),
+            userId: Number(row.userId),
+            isActive: row.isActive === true || row.isActive === 1 || row.isActive === "1" || row.isActive === "true",
+            user: {
+                id: Number(row.memberUserId || 0),
+                email: row.memberUserEmail || "",
+                firstName: row.memberUserFirstName || "",
+                lastName: row.memberUserLastName || "",
+                fullName: row.memberUserFullName || "",
+            }
+        }));
     }
 
     async update(id: number, groupDTO: GroupDTO, queryRunner?: QueryRunner): Promise<Groups | null> {
@@ -105,15 +147,22 @@ export class GroupService {
 
             // Update Junction Table: Group Members (Sync pattern)
             if (groupMemberIds) {
-                // Delete existing records for this group
-                await manager.delete(GroupMember, { groupId: id });
+                await manager.update(GroupMember, { groupId: id }, { isActive: false });
 
-                // Insert new ones
                 if (groupMemberIds.length > 0) {
-                    const newMembers = groupMemberIds.map(userId =>
-                        manager.create(GroupMember, { groupId: id, userId })
-                    );
-                    group.groupMembers = await manager.save(GroupMember, newMembers);
+                    for (const userId of groupMemberIds) {
+                        const existingMember = await manager.findOneBy(GroupMember, { groupId: id, userId });
+                        if (existingMember) {
+                            existingMember.isActive = true;
+                            await manager.save(GroupMember, existingMember);
+                        } else {
+                            await manager.save(GroupMember, manager.create(GroupMember, {
+                                groupId: id,
+                                userId,
+                                isActive: true
+                            }));
+                        }
+                    }
                 }
             }
 
@@ -146,13 +195,23 @@ export class GroupService {
             const { groupMemberIds } = groupDTO;
             // 3. Handle Junction Table: Group Members
             if (groupMemberIds?.length > 0) {
-                const membershipRows = groupMemberIds.map((userId) => {
-                    return manager.create(GroupMember, {
-                        groupId: groupId,
-                        userId: userId,
-                    });
-                });
-                return await manager.save(GroupMember, membershipRows);
+                const membershipRows: GroupMember[] = [];
+
+                for (const userId of groupMemberIds) {
+                    const existingMember = await manager.findOneBy(GroupMember, { groupId, userId });
+                    if (existingMember) {
+                        existingMember.isActive = true;
+                        membershipRows.push(await manager.save(GroupMember, existingMember));
+                    } else {
+                        membershipRows.push(await manager.save(GroupMember, manager.create(GroupMember, {
+                            groupId,
+                            userId,
+                            isActive: true,
+                        })));
+                    }
+                }
+
+                return membershipRows;
             }
             throw new APIError("No Members provided to add");
 
@@ -176,9 +235,11 @@ export class GroupService {
             if (userBalances.length > 0) {
                 throw new ValidationError("Cannot remove members as they have a balance in the group")
             }
-            const result = await manager.delete(GroupMember, {
+            const result = await manager.update(GroupMember, {
                 groupId: groupId,
-                userId: groupMemberIds[0],
+                userId: In(groupMemberIds),
+            }, {
+                isActive: false,
             });
             return !!(result.affected && result.affected > 0);
         }, queryRunner);
