@@ -55,6 +55,13 @@ export const CreateOrUpdateSettleExpenseSchema = z.object({
       path: ['paidByUserId']
     });
   }
+  if(data.settledMemberId <= 0 ){
+    ctx.addIssue({
+      code: "custom",
+      message: "Settled to member is required",
+      path: ['settledMemberId']
+    });
+  }
 });
 
 export const SettleExpenseSchema = z.object({
