@@ -55,6 +55,13 @@ export const CreateOrUpdateSettleExpenseSchema = z.object({
       path: ['paidByUserId']
     });
   }
+  if(data.settledMemberId <= 0 ){
+    ctx.addIssue({
+      code: "custom",
+      message: "Settled to member is required",
+      path: ['settledMemberId']
+    });
+  }
 });
 
 export const SettleExpenseSchema = z.object({
@@ -84,6 +91,14 @@ export const UpdateExpenseSchema = z.object({
 
 export const ExpenseFilterSchema = z.object({
   expenseDate: z.coerce.date().optional(),
+  startDate: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.coerce.date().optional()
+  ),
+  endDate: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.coerce.date().optional()
+  ),
   title: z.string().optional(),
   description: z.string().optional(),
   amount: z.coerce.number().positive().optional(),
@@ -91,6 +106,7 @@ export const ExpenseFilterSchema = z.object({
   paidByUserId: z.array(z.coerce.number().or(z.enum([Filter_NONE]))).or(z.enum([Filter_ALL])).optional(),
   groupId: z.array(z.coerce.number().int().or(z.enum([Filter_NONE]))).or(z.enum([Filter_ALL])).optional(),
   expenseCategoryId: z.array(z.coerce.number().int().or(z.enum([Filter_NONE]))).or(z.enum([Filter_ALL])).optional(),
+  limit: z.coerce.number().int().positive().optional(),
 })
 
 const superRefine = (data: any, ctx: any) => {

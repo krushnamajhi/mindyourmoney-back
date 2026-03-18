@@ -38,4 +38,8 @@ export class ExpenseFilterDTO {
     @IsOptional()
     isShared: MultiSelectFilter<boolean>;
 
+    @IsNumber()
+    @IsOptional()
+    limit?: number;
+
 }
