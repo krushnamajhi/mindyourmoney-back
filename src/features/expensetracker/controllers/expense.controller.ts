@@ -52,6 +52,16 @@ export class ExpenseController {
         }
     }
 
+    isEditable: RequestHandler = async (req, res, next: NextFunction) => {
+        const { id } = req.params;
+        try {
+            const data = await this.expenseService.checkEditable(Number(id));
+            res.status(200).json({ success: true, data });
+        } catch (error: any) {
+            next(error)
+        }
+    }
+
     delete: RequestHandler = async (req, res, next: NextFunction) => {
         const { id } = req.params;
         try {
