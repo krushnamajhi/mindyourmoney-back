@@ -145,10 +145,13 @@ export class GroupService {
             // Update basic fields
             Object.assign(group, details);
 
+                console.log(id,"jjj", groupMemberIds)
+
             // Update Junction Table: Group Members (Sync pattern)
             if (groupMemberIds) {
-                await manager.update(GroupMember, { groupId: id }, { isActive: false });
 
+                await manager.update(GroupMember, { groupId: id }, { isActive: false });
+                console.log(id,"jjjww", groupMemberIds)
                 if (groupMemberIds.length > 0) {
                     for (const userId of groupMemberIds) {
                         const existingMember = await manager.findOneBy(GroupMember, { groupId: id, userId });
@@ -159,14 +162,14 @@ export class GroupService {
                             await manager.save(GroupMember, manager.create(GroupMember, {
                                 groupId: id,
                                 userId,
-                                isActive: true
+                                isActive: true,
                             }));
                         }
                     }
                 }
             }
-
-            return await manager.save(group);
+            await manager.update(Groups,{id : id} , details)
+            return await this.getById(id, manager);
         }, queryRunner);
     }
 
