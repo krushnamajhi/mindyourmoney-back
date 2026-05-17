@@ -1,6 +1,6 @@
 import { NextFunction } from "express";
 import { AppDataSource } from "../../../config/database";
-import { ValidationError } from "../../../lib/custom-errors";
+import { APIError, ValidationError } from "../../../lib/custom-errors";
 import { UserInfo } from "../entities/user-info";
 import { User } from "../entities/user";
 import { CreateUserDTO } from "../dto/create-user.dto";
@@ -10,6 +10,7 @@ import { UserMappings } from "../entities/user-mappings.entity";
 import { LoginUserDTO } from "../dto/login-user.dto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { Like } from "typeorm";
 
 export class UserService {
 
@@ -33,6 +34,24 @@ export class UserService {
             throw new Error(err);
         }
     }
+
+async searchUser(searchedValue: string): Promise<UserInfo[]> {
+    try {
+        // We use an array of objects in 'where' to create an OR condition
+        const users =  await this.userRepo.find({
+            where: [
+                { userInfo: { email: Like(`%${searchedValue}%`) } },
+                { userInfo: { fullName: Like(`%${searchedValue}%`) } },
+            ],
+            relations: ['userInfo'] // Ensure the relation is loaded
+        });
+
+        return users.map(user => user.userInfo);
+    } catch (err: any) {
+        // Better to log the error and throw a custom ValidationError or a generic message
+        throw new APIError(`User search failed: ${err.message}`);
+    }
+}
 
 
     async add(userDto: CreateUserDTO): Promise<User> {

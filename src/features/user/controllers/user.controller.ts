@@ -3,6 +3,7 @@ import { UserService } from "../services/user.service";
 import { CreateUserDTO } from "../dto/create-user.dto";
 import { UpdateUserDTO } from "../dto/update-user.dto";
 import { LoginUserDTO } from "../dto/login-user.dto";
+import { ValidationError } from "../../../lib/custom-errors";
 
 export class UserController {
 
@@ -105,4 +106,29 @@ export class UserController {
             next(error);
         }
     }
+
+    async search(req: Request, res: Response, next: NextFunction): Promise<void>{
+    try {
+        const userService = new UserService();
+        const query = req.params.query?.toString();
+        console.log(query, req.params, req.query, "request data 3")
+
+        // Validation: Prevent empty or too-short searches for DB performance
+        if (!query || query.trim().length < 2) {
+            throw new ValidationError("Search query must be at least 2 characters.");
+        }
+
+        const results = await userService.searchUser(query.trim());
+
+        res.status(200).json({
+            status: "success",
+            timestamp: new Date().toISOString(),
+            count: results.length,
+            data: results
+        });
+    } catch (error) {
+        // Pass to global error middleware for secure logging
+        next(error);
+    }
+}
 }
