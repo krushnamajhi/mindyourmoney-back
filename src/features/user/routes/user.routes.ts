@@ -15,5 +15,6 @@ export function UserRoutes() {
     router.put('/:id', validate(updaterUserSchema), userController.updateUser);
     router.post('/login', validate(loginSchema), userController.login);
     router.get('/current/me', authMiddleware, userController.getCurrentUser);
+    router.get('/search/q=:query', authMiddleware, userController.search);
     return router;
 }
