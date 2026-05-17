@@ -6,23 +6,22 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-createConnection();
-app.use(cors({
-    origin: (origin, callback) => {
-        // Reflect origin back dynamically (critical for cookies/credentials) or default to true
-        callback(null, origin || true);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-    exposedHeaders: ['Set-Cookie']
-}));
-app.use(cookieParser());
-useFeatureRoutes(app);
-startServer(app)
+const startApp = async () => {
+    // Await database connection before accepting traffic
+    await createConnection();
 
-app.use(middlewares.handleRequestError);
+    app.use(cors());
+    app.use(cookieParser());
+    useFeatureRoutes(app);
+    startServer(app);
+
+    app.use(middlewares.handleRequestError);
+};
+
+startApp().catch((err) => {
+    console.error("Failed to start application:", err);
+    process.exit(1);
+});
 
 export { app }; 

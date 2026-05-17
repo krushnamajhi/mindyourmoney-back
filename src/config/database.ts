@@ -21,7 +21,8 @@ export const AppDataSource = new DataSource({
     url: databaseUrl,
     synchronize: false,
     logging: true,
-    connectTimeout: 10000,
+    connectTimeout: 30000,
+    ssl: process.env.DB_TYPE === 'postgres' ? { rejectUnauthorized: false } : undefined,
     entities: [
         `./${srcRoot}/features/**/entities/*.${ext}`
     ],
