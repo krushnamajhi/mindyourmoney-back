@@ -11,24 +11,24 @@ if (!process.env.DB_TYPE) {
     throw new Error("DB_TYPE is not defined");
 }
 
+// Detect whether we're running from compiled dist/ or via ts-node/ts-node-dev
+const isCompiled = __filename.endsWith('.js');
+const srcRoot = isCompiled ? 'dist' : 'src';
+const ext = isCompiled ? 'js' : 'ts';
+
 export const AppDataSource = new DataSource({
     type: process.env.DB_TYPE as any,
     url: databaseUrl,
-    // host: "localhost",
-    // port: 3306,
-    // username: "root",
-    // password: "root123",
-    // database: "mymdb",
     synchronize: false,
     logging: true,
     connectTimeout: 10000,
     entities: [
-        "./src/features/**/entities/*.ts"
+        `./${srcRoot}/features/**/entities/*.${ext}`
     ],
     subscribers: [
-        "./src/subscribers/*.ts"
+        `./${srcRoot}/subscribers/*.${ext}`
     ],
     migrations: [
-        "./src/features/**/migrates/*.ts"
+        `./${srcRoot}/features/**/migrates/*.${ext}`
     ]
 });
