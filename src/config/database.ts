@@ -1,8 +1,10 @@
 import { DataSource } from "typeorm";
+import "dotenv/config";
 
+const databaseUrl = process.env.DB_URL || process.env.DB_URL;
 
-if (!process.env.DB_URL) {
-    throw new Error("DATABASE_URL is not defined");
+if (!databaseUrl) {
+    throw new Error("DB_URL or DATABASE_URL is not defined");
 }
 
 if (!process.env.DB_TYPE) {
@@ -11,7 +13,7 @@ if (!process.env.DB_TYPE) {
 
 export const AppDataSource = new DataSource({
     type: process.env.DB_TYPE as any,
-    url: process.env.DB_URL,
+    url: databaseUrl,
     // host: "localhost",
     // port: 3306,
     // username: "root",

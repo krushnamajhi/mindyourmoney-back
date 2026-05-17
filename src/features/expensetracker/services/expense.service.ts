@@ -20,8 +20,71 @@ import { UserBalance } from "../entities/simplified-peer-debt.view";
 import { context } from "../../../utils/apiUtils";
 import { Filter_ALL, Filter_NONE } from "../../../config/constants";
 import { ExpenseRowDTO, ExpenseRowDayWiseDTO, ExpenseRowMonthWiseDTO } from "../dto/expenses-rows.dto";
+import { GroupMember } from "../entities/group-member";
 
 export class ExpenseService {
+
+    async checkEditable(expenseId: number, transactionalManager?: EntityManager): Promise<{ editable: boolean; message?: string }> {
+        const manager = SQLUtils.getManager(transactionalManager);
+
+        const expense = await SQLUtils.getRepo(Expense, manager).findOne({
+            where: { id: expenseId as any },
+            relations: ["group", "paidByUser", "paidByUser.userInfo"]
+        });
+        if (!expense) throw new NotFoundException("Expense not found");
+
+        const groupId = expense.group?.id;
+        if (!expense.isShared || !groupId) return { editable: true };
+
+        const memberIds = new Set<number>();
+        const payerId = expense.paidByUser?.userInfo?.id;
+        if (payerId) memberIds.add(payerId);
+
+        const debtSplits = await manager.find(DebtMemberSplitExpenseLine, { where: { expenseId } });
+        debtSplits.forEach((s) => memberIds.add(s.groupMemberId));
+
+        const itemDebtSplits = await manager.find(DebtMemberSplitExpenseItemLine, { where: { expenseId } });
+        itemDebtSplits.forEach((s) => memberIds.add(s.groupMemberId));
+
+        const uniqueMemberIds = [...memberIds];
+        if (uniqueMemberIds.length === 0) return { editable: true };
+
+        const activeRows = await SQLUtils.getRepo(GroupMember, manager).find({
+            select: { userId: true } as any,
+            where: {
+                groupId,
+                userId: In(uniqueMemberIds),
+                isActive: true
+            } as any
+        });
+
+        if (activeRows.length !== uniqueMemberIds.length) {
+            return {
+                editable: false,
+                message: "This expense has inactive users present. Hence cannot be modified/deleted. first add those user to the group."
+            };
+        }
+
+        return { editable: true };
+    }
+
+    private async assertGroupUsersAreActive(groupId: number, userIds: number[], manager: EntityManager) {
+        const uniqueUserIds = [...new Set((userIds || []).filter((id) => typeof id === "number" && !Number.isNaN(id)))];
+        if (!groupId || uniqueUserIds.length === 0) return;
+
+        const activeRows = await SQLUtils.getRepo(GroupMember, manager).find({
+            select: { userId: true } as any,
+            where: {
+                groupId,
+                userId: In(uniqueUserIds),
+                isActive: true
+            } as any
+        });
+
+        if (activeRows.length !== uniqueUserIds.length) {
+            throw new ValidationError("this expense has inactive users present. first add those user to the group.");
+        }
+    }
 
     async create(expenseDTO: ExpenseDTO, userId: number, queryRunner?: QueryRunner): Promise<Expense> {
         return await SQLUtils.executeTransaction(async (manager: EntityManager) => {
@@ -216,6 +279,27 @@ export class ExpenseService {
                     expense.isShared = true;
                 }
 
+                const targetGroupId = expense.group?.id;
+                if (targetGroupId) {
+                    const shouldResplit = !!(debtMemberSplits || expenseItemLines);
+                    const memberIds = new Set<number>();
+                    memberIds.add(expenseDTO.paidByUserId ?? expense.paidByUser?.userInfo?.id);
+
+                    if (shouldResplit) {
+                        (debtMemberSplits || []).forEach((s) => memberIds.add(s.userId));
+                        (expenseItemLines || []).forEach((line) => {
+                            (line.debtMemberSplitsExpenseItemLines || []).forEach((s) => memberIds.add(s.userId));
+                        });
+                    } else {
+                        const existingSplits = await manager.find(DebtMemberSplitExpenseLine, {
+                            where: { expenseId: expense.id }
+                        });
+                        existingSplits.forEach((s) => memberIds.add(s.groupMemberId));
+                    }
+
+                    await this.assertGroupUsersAreActive(targetGroupId, [...memberIds], manager);
+                }
+
                 // 6. Save the main expense changes
                 const updatedExpense = await manager.save(expense);
                 console.log(debtMemberSplits, expenseItemLines, "log2")
@@ -253,6 +337,25 @@ export class ExpenseService {
 
     async delete(id: number, queryRunner?: QueryRunner): Promise<boolean> {
         return await SQLUtils.executeTransaction(async (manager: EntityManager) => {
+            const expense = await SQLUtils.getRepo(Expense, manager).findOne({
+                where: { id: id as any },
+                relations: ["group", "paidByUser", "paidByUser.userInfo"]
+            });
+
+            if (expense?.isShared && expense.group?.id) {
+                const memberIds = new Set<number>();
+                const payerId = expense.paidByUser?.userInfo?.id;
+                if (payerId) memberIds.add(payerId);
+
+                const debtSplits = await manager.find(DebtMemberSplitExpenseLine, { where: { expenseId: id } });
+                debtSplits.forEach((s) => memberIds.add(s.groupMemberId));
+
+                const itemDebtSplits = await manager.find(DebtMemberSplitExpenseItemLine, { where: { expenseId: id } });
+                itemDebtSplits.forEach((s) => memberIds.add(s.groupMemberId));
+
+                await this.assertGroupUsersAreActive(expense.group.id, [...memberIds], manager);
+            }
+
             await SQLUtils.getRepo(DebtMemberSplitExpenseItemLine, manager).softDelete({ expenseId: id });
             await SQLUtils.getRepo(ExpenseItemLine, manager).softDelete({ expenseId: id });
             await SQLUtils.getRepo(DebtMemberSplitExpenseLine, manager).softDelete({ expenseId: id });

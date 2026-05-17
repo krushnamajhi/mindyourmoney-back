@@ -10,6 +10,7 @@ export function GroupRoutes() {
 
     router.get('/list', groupController.list);
     router.get('/:id', groupController.getById);
+    router.get('/:id/members', groupController.getMembersByGroupId);
     router.post('/create', validate(GroupSchema), groupController.create);
     router.put('/:id', validate(UpdateGroupSchema), groupController.update);
     router.delete('/:id', groupController.delete);
