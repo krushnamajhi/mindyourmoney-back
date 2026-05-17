@@ -2,7 +2,7 @@ services:
   - type: web
     name: mindyourmoney-back
     env: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main/app.js
     envVars:
       - key: NODE_ENV

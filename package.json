@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start-dev": "nodemon ./src/main/app.ts",
-    "start": "npm run build && node dist/main/app.js",
+    "start": "node dist/main/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/main/app.ts",
     "build": "tsc -p tsconfig.json",
     "migrate": "typeorm-ts-node-commonjs migration:run -d ./src/config/database.ts"
