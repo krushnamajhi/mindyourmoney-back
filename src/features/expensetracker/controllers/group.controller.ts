@@ -60,6 +60,16 @@ export class GroupController {
         }
     }
 
+    getMembersByGroupId: RequestHandler = async (req, res, next: NextFunction) => {
+        const { id } = req.params;
+        try {
+            const members = await this.groupService.getMembersByGroupId(Number(id));
+            res.json(members);
+        } catch (error: any) {
+            next(error)
+        }
+    }
+
     delete: RequestHandler = async (req, res, next: NextFunction) => {
         const { id } = req.params;
         try {

@@ -13,6 +13,9 @@ export class GroupMember extends DefaultEntity {
     @PrimaryColumn()
     userId: number;
 
+    @Column({ default: true })
+    isActive: boolean;
+
     @ManyToOne(() => Groups, group => group.groupMembers)
     @JoinColumn({ name: "groupId" })
     group: Groups;

@@ -10,6 +10,7 @@ export function ExpenseRoutes() {
 
     router.get('/list', expenseController.list);
     router.get('/:id/details', expenseController.getExpenseDetails);
+    router.get('/:id/editable', expenseController.isEditable);
     router.get('/:id', expenseController.getById);
     router.post('/create', validate(ExpenseSchema), expenseController.create);
     router.put('/settle/:id', validate(CreateOrUpdateSettleExpenseSchema), expenseController.editSettleExpense);
