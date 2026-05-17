@@ -23,9 +23,11 @@ export const useFeatureRoutes = (app: any) => {
 }
 
 export const startServer = (app: any) => {
+    // Render will inject process.env.PORT automatically
     const PORT = process.env.PORT || 3000;
-    const HOST = process.env.APP_HOST || "localhost"
-    app.listen(PORT, HOST, () => {
-        console.log(`Server is running on http://${HOST}:${PORT}`);
+
+    // Only pass PORT to app.listen()
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
     });
 }
