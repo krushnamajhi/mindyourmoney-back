@@ -7,7 +7,7 @@ export const AppDataSource = new DataSource({
     username: "root",
     password: "root123",
     database: "mymdb",
-    synchronize: false,
+    synchronize: true,
     logging: true,
     connectTimeout: 10000,
     entities: [
