@@ -19,7 +19,7 @@ const ext = isCompiled ? 'js' : 'ts';
 export const AppDataSource = new DataSource({
     type: process.env.DB_TYPE as any,
     url: databaseUrl,
-    synchronize: false,
+    synchronize: true,
     logging: true,
     connectTimeout: 30000,
     ssl: process.env.DB_TYPE === 'postgres' ? { rejectUnauthorized: false } : undefined,
